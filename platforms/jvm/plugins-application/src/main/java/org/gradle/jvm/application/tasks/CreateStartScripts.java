@@ -18,9 +18,12 @@ package org.gradle.jvm.application.tasks;
 
 import com.google.common.collect.Lists;
 import org.apache.commons.lang3.StringUtils;
+import org.gradle.api.DefaultTask;
 import org.gradle.api.Incubating;
+import org.gradle.api.file.ConfigurableFileCollection;
+import org.gradle.api.file.DirectoryProperty;
 import org.gradle.api.file.FileCollection;
-import org.gradle.api.internal.ConventionTask;
+import org.gradle.api.file.RegularFileProperty;
 import org.gradle.api.internal.plugins.AppEntryPoint;
 import org.gradle.api.internal.plugins.MainClass;
 import org.gradle.api.internal.plugins.MainModule;
@@ -29,6 +32,7 @@ import org.gradle.api.internal.plugins.UnixStartScriptGenerator;
 import org.gradle.api.internal.plugins.WindowsStartScriptGenerator;
 import org.gradle.api.jvm.ModularitySpec;
 import org.gradle.api.model.ObjectFactory;
+import org.gradle.api.provider.ListProperty;
 import org.gradle.api.provider.Property;
 import org.gradle.api.resources.TextResource;
 import org.gradle.api.tasks.Classpath;
@@ -46,12 +50,9 @@ import org.gradle.jvm.application.scripts.ScriptGenerator;
 import org.gradle.jvm.application.scripts.TemplateBasedScriptGenerator;
 import org.gradle.util.internal.GUtil;
 import org.gradle.work.DisableCachingByDefault;
-import org.jspecify.annotations.Nullable;
 
 import javax.inject.Inject;
-import java.io.File;
 import java.util.Collections;
-import java.util.LinkedList;
 import java.util.stream.Collectors;
 
 /**
@@ -93,7 +94,7 @@ import java.util.stream.Collectors;
  * </pre>
  * <p>
  * The default generators are of the type {@link TemplateBasedScriptGenerator}, with default templates.
- * This templates can be changed via the {@link TemplateBasedScriptGenerator#setTemplate(TextResource)} method.
+ * The templates can be changed via the {@link TemplateBasedScriptGenerator#setTemplate(TextResource)} method.
  * <p>
  * The default implementations used by this task use <a href="https://docs.groovy-lang.org/latest/html/documentation/template-engines.html#_simpletemplateengine">Groovy's SimpleTemplateEngine</a>
  * to parse the template, with the following variables available:
@@ -125,27 +126,20 @@ import java.util.stream.Collectors;
  * </pre>
  */
 @DisableCachingByDefault(because = "Not worth caching")
-public abstract class CreateStartScripts extends ConventionTask {
+public abstract class CreateStartScripts extends DefaultTask {
 
-    private File outputDir;
-    private String executableDir = "bin";
-    private final Property<String> mainModule;
-    private final Property<String> mainClass;
-    private Iterable<String> defaultJvmOpts = new LinkedList<>();
-    private String applicationName;
-    private final Property<String> gitRef;
-    private String optsEnvironmentVar;
-    private String exitEnvironmentVar;
-    private FileCollection classpath;
     private final ModularitySpec modularity;
     private ScriptGenerator unixStartScriptGenerator = new UnixStartScriptGenerator();
     private ScriptGenerator windowsStartScriptGenerator = new WindowsStartScriptGenerator();
 
     public CreateStartScripts() {
-        this.mainModule = getObjectFactory().property(String.class);
-        this.mainClass = getObjectFactory().property(String.class);
-        this.gitRef = getObjectFactory().property(String.class).convention("HEAD");
         this.modularity = getObjectFactory().newInstance(DefaultModularitySpec.class);
+        getExecutableDir().convention("bin");
+        getGitRef().convention("HEAD");
+        getOptsEnvironmentVar().convention(getApplicationName().map(n -> GUtil.toConstant(n) + "_OPTS"));
+        getExitEnvironmentVar().convention(getApplicationName().map(n -> GUtil.toConstant(n) + "_EXIT_CONSOLE"));
+        getUnixScript().convention(getOutputDir().file(getApplicationName()));
+        getWindowsScript().convention(getOutputDir().file(getApplicationName().map(n -> n + ".bat")));
     }
 
     @Inject
@@ -155,74 +149,10 @@ public abstract class CreateStartScripts extends ConventionTask {
     protected abstract JavaModuleDetector getJavaModuleDetector();
 
     /**
-     * The environment variable to use to provide additional options to the JVM.
-     */
-    @Nullable
-    @Optional
-    @Input
-    @ToBeReplacedByLazyProperty
-    public String getOptsEnvironmentVar() {
-        if (GUtil.isTrue(optsEnvironmentVar)) {
-            return optsEnvironmentVar;
-        }
-
-        if (!GUtil.isTrue(getApplicationName())) {
-            return null;
-        }
-
-        return GUtil.toConstant(getApplicationName()) + "_OPTS";
-    }
-
-    /**
-     * The environment variable to use to control exit value (Windows only).
-     */
-    @Nullable
-    @Optional
-    @Input
-    @ToBeReplacedByLazyProperty
-    public String getExitEnvironmentVar() {
-        if (GUtil.isTrue(exitEnvironmentVar)) {
-            return exitEnvironmentVar;
-        }
-
-        if (!GUtil.isTrue(getApplicationName())) {
-            return null;
-        }
-
-        return GUtil.toConstant(getApplicationName()) + "_EXIT_CONSOLE";
-    }
-
-    /**
-     * Returns the full path to the Unix script. The target directory is represented by the output directory, the file name is the application name without a file extension.
-     */
-    @Internal
-    @ToBeReplacedByLazyProperty
-    public File getUnixScript() {
-        return new File(getOutputDir(), getApplicationName());
-    }
-
-    /**
-     * Returns the full path to the Windows script. The target directory is represented by the output directory, the file name is the application name plus the file extension .bat.
-     */
-    @Internal
-    @ToBeReplacedByLazyProperty
-    public File getWindowsScript() {
-        return new File(getOutputDir(), getApplicationName() + ".bat");
-    }
-
-    /**
      * The directory to write the scripts into.
      */
     @OutputDirectory
-    @Nullable
-    @ToBeReplacedByLazyProperty
-    public File getOutputDir() {
-        return outputDir;
-    }
-
-    public void setOutputDir(@Nullable File outputDir) {
-        this.outputDir = outputDir;
-    }
+    public abstract DirectoryProperty getOutputDir();
 
     /**
      * The directory to write the scripts into in the distribution.
@@ -230,19 +160,7 @@ public abstract class CreateStartScripts extends ConventionTask {
      * @since 4.5
      */
     @Input
-    @ToBeReplacedByLazyProperty
-    public String getExecutableDir() {
-        return executableDir;
-    }
-
-    /**
-     * The directory to write the scripts into in the distribution.
-     *
-     * @since 4.5
-     */
-    public void setExecutableDir(String executableDir) {
-        this.executableDir = executableDir;
-    }
+    public abstract Property<String> getExecutableDir();
 
     /**
      * The main module name used to start the modular Java application.
@@ -251,9 +169,7 @@ public abstract class CreateStartScripts extends ConventionTask {
      */
     @Optional
     @Input
-    public Property<String> getMainModule() {
-        return mainModule;
-    }
+    public abstract Property<String> getMainModule();
 
     /**
      * The main class name used to start the Java application.
@@ -262,69 +178,52 @@ public abstract class CreateStartScripts extends ConventionTask {
      */
     @Optional
     @Input
-    public Property<String> getMainClass() {
-        return mainClass;
-    }
+    public abstract Property<String> getMainClass();
 
     /**
      * The application's default JVM options. Defaults to an empty list.
      */
-    @Nullable
     @Optional
     @Input
-    @ToBeReplacedByLazyProperty
-    public Iterable<String> getDefaultJvmOpts() {
-        return defaultJvmOpts;
-    }
-
-    public void setDefaultJvmOpts(@Nullable Iterable<String> defaultJvmOpts) {
-        this.defaultJvmOpts = defaultJvmOpts;
-    }
+    public abstract ListProperty<String> getDefaultJvmOpts();
 
     /**
      * The application's name.
      */
-    @Nullable
+    @Optional
     @Input
-    @ToBeReplacedByLazyProperty
-    public String getApplicationName() {
-        return applicationName;
-    }
-
-    public void setApplicationName(@Nullable String applicationName) {
-        this.applicationName = applicationName;
-    }
+    public abstract Property<String> getApplicationName();
 
     /**
      * The Git revision or tag.
      *
      * @since 9.4.0
      */
-    @Input
-    @Optional
     @Incubating
-    public Property<String> getGitRef() {
-        return gitRef;
-    }
+    @Optional
+    @Input
+    public abstract Property<String> getGitRef();
 
-    public void setOptsEnvironmentVar(@Nullable String optsEnvironmentVar) {
-        this.optsEnvironmentVar = optsEnvironmentVar;
-    }
+    /**
+     * The environment variable to use to provide additional options to the JVM.
+     */
+    @Optional
+    @Input
+    public abstract Property<String> getOptsEnvironmentVar();
 
-    public void setExitEnvironmentVar(@Nullable String exitEnvironmentVar) {
-        this.exitEnvironmentVar = exitEnvironmentVar;
-    }
+    /**
+     * The environment variable to use to control exit value (Windows only).
+     */
+    @Optional
+    @Input
+    public abstract Property<String> getExitEnvironmentVar();
 
     /**
      * The class path for the application.
      */
-    @Nullable
-    @Classpath
     @Optional
-    @ToBeReplacedByLazyProperty
-    public FileCollection getClasspath() {
-        return classpath;
-    }
+    @Classpath
+    public abstract ConfigurableFileCollection getClasspath();
 
     /**
      * Returns the module path handling for executing the main class.
@@ -336,9 +235,21 @@ public abstract class CreateStartScripts extends ConventionTask {
         return modularity;
     }
 
-    public void setClasspath(@Nullable FileCollection classpath) {
-        this.classpath = classpath;
-    }
+    /**
+     * The UNIX-like start script.
+     *
+     * @since 7.0
+     */
+    @Internal
+    public abstract RegularFileProperty getUnixScript();
+
+    /**
+     * The Windows start script.
+     *
+     * @since 7.0
+     */
+    @Internal
+    public abstract RegularFileProperty getWindowsScript();
 
     /**
      * The UNIX-like start script generator.
@@ -372,28 +283,28 @@ public abstract class CreateStartScripts extends ConventionTask {
     public void generate() {
         StartScriptGenerator generator = new StartScriptGenerator(unixStartScriptGenerator, windowsStartScriptGenerator);
         JavaModuleDetector javaModuleDetector = getJavaModuleDetector();
-        generator.setApplicationName(getApplicationName());
+        generator.setApplicationName(getApplicationName().get());
         generator.setGitRef(getGitRef().get());
         generator.setEntryPoint(getEntryPoint());
-        generator.setDefaultJvmOpts(getDefaultJvmOpts());
-        generator.setOptsEnvironmentVar(getOptsEnvironmentVar());
-        generator.setExitEnvironmentVar(getExitEnvironmentVar());
-        generator.setClasspath(getRelativePath(javaModuleDetector.inferClasspath(mainModule.isPresent(), getClasspath())));
-        generator.setModulePath(getRelativePath(javaModuleDetector.inferModulePath(mainModule.isPresent(), getClasspath())));
-        if (StringUtils.isEmpty(getExecutableDir())) {
-            generator.setScriptRelPath(getUnixScript().getName());
+        generator.setDefaultJvmOpts(getDefaultJvmOpts().get());
+        generator.setOptsEnvironmentVar(getOptsEnvironmentVar().get());
+        generator.setExitEnvironmentVar(getExitEnvironmentVar().get());
+        generator.setClasspath(getRelativePath(javaModuleDetector.inferClasspath(getMainModule().isPresent(), getClasspath())));
+        generator.setModulePath(getRelativePath(javaModuleDetector.inferModulePath(getMainModule().isPresent(), getClasspath())));
+        if (StringUtils.isEmpty(getExecutableDir().get())) {
+            generator.setScriptRelPath(getUnixScript().get().getAsFile().getName());
         } else {
-            generator.setScriptRelPath(getExecutableDir() + "/" + getUnixScript().getName());
+            generator.setScriptRelPath(getExecutableDir().get() + "/" + getUnixScript().get().getAsFile().getName());
         }
-        generator.generateUnixScript(getUnixScript());
-        generator.generateWindowsScript(getWindowsScript());
+        generator.generateUnixScript(getUnixScript().get().getAsFile());
+        generator.generateWindowsScript(getWindowsScript().get().getAsFile());
     }
 
     private AppEntryPoint getEntryPoint() {
-        if (mainModule.isPresent()) {
-            return new MainModule(mainModule.get(), mainClass.getOrNull());
+        if (getMainModule().isPresent()) {
+            return new MainModule(getMainModule().get(), getMainClass().getOrNull());
         }
-        return new MainClass(mainClass.getOrElse(""));
+        return new MainClass(getMainClass().getOrElse(""));
     }
 
     @Input
@@ -411,5 +322,4 @@ public abstract class CreateStartScripts extends ConventionTask {
     private Iterable<String> getRelativePath(FileCollection path) {
         return path.getFiles().stream().map(input -> "lib/" + input.getName()).collect(Collectors.toCollection(Lists::newArrayList));
     }
-
 }
