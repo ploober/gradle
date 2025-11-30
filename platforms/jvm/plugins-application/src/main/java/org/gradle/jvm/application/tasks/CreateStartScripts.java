@@ -42,7 +42,6 @@ import org.gradle.api.tasks.Nested;
 import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.TaskAction;
-import org.gradle.internal.instrumentation.api.annotations.ToBeReplacedByLazyProperty;
 import org.gradle.internal.jvm.DefaultModularitySpec;
 import org.gradle.internal.jvm.JavaModuleDetector;
 import org.gradle.jvm.application.scripts.JavaAppStartScriptGenerationDetails;
@@ -52,7 +51,6 @@ import org.gradle.util.internal.GUtil;
 import org.gradle.work.DisableCachingByDefault;
 
 import javax.inject.Inject;
-import java.util.Collections;
 import java.util.stream.Collectors;
 
 /**
@@ -140,6 +138,7 @@ public abstract class CreateStartScripts extends DefaultTask {
         getExitEnvironmentVar().convention(getApplicationName().map(n -> GUtil.toConstant(n) + "_EXIT_CONSOLE"));
         getUnixScript().convention(getOutputDir().file(getApplicationName()));
         getWindowsScript().convention(getOutputDir().file(getApplicationName().map(n -> n + ".bat")));
+        getRelativeClasspath().convention(getProject().provider(() -> getRelativePath(getClasspath()))); // TODO - is this right?
     }
 
     @Inject
@@ -289,7 +288,7 @@ public abstract class CreateStartScripts extends DefaultTask {
         generator.setDefaultJvmOpts(getDefaultJvmOpts().get());
         generator.setOptsEnvironmentVar(getOptsEnvironmentVar().get());
         generator.setExitEnvironmentVar(getExitEnvironmentVar().get());
-        generator.setClasspath(getRelativePath(javaModuleDetector.inferClasspath(getMainModule().isPresent(), getClasspath())));
+        generator.setClasspath(getRelativeClasspath().get());
         generator.setModulePath(getRelativePath(javaModuleDetector.inferModulePath(getMainModule().isPresent(), getClasspath())));
         if (StringUtils.isEmpty(getExecutableDir().get())) {
             generator.setScriptRelPath(getUnixScript().get().getAsFile().getName());
@@ -308,16 +307,7 @@ public abstract class CreateStartScripts extends DefaultTask {
     }
 
     @Input
-    @ToBeReplacedByLazyProperty(unreported = true, comment = "Skipped for report since method is protected")
-    protected Iterable<String> getRelativeClasspath() {
-        //a list instance is needed here, as org.gradle.internal.snapshot.ValueSnapshotter.processValue() does not support
-        //serializing Iterators directly
-        final FileCollection classpathNullable = getClasspath();
-        if (classpathNullable == null) {
-            return Collections.emptyList();
-        }
-        return getRelativePath(classpathNullable);
-    }
+    protected abstract ListProperty<String> getRelativeClasspath();
 
     private Iterable<String> getRelativePath(FileCollection path) {
         return path.getFiles().stream().map(input -> "lib/" + input.getName()).collect(Collectors.toCollection(Lists::newArrayList));

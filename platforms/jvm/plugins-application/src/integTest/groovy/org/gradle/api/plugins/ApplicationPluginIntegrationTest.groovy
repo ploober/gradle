@@ -501,8 +501,8 @@ application.applicationDefaultJvmArgs = ["-DappHomeSystemProp=REPLACE_THIS_WITH_
 
 startScripts {
     doLast {
-        unixScript.text = unixScript.text.replace("REPLACE_THIS_WITH_APP_HOME", "'\\\$APP_HOME'")
-        windowsScript.text = windowsScript.text.replace("REPLACE_THIS_WITH_APP_HOME", '%APP_HOME%')
+        unixScript.get().asFile.text = unixScript.get().asFile.text.replace("REPLACE_THIS_WITH_APP_HOME", "'\\\$APP_HOME'")
+        windowsScript.get().asFile.text = windowsScript.get().asFile.text.replace("REPLACE_THIS_WITH_APP_HOME", '%APP_HOME%')
     }
 }
 """
@@ -840,13 +840,47 @@ rootProject.name = 'sample'
     }
 
     @Issue("https://github.com/gradle/gradle/issues/34069")
-    def "Treat template as input for incremental build"() {
+    def "Treat template as input for incremental build (Groovy)"() {
+        given:
+        buildFile << """
+            tasks.register("foo", CreateStartScripts) {
+                applicationName.set("foo")
+                outputDir.set(layout.buildDirectory.dir("tmp/foo"))
+                unixStartScriptGenerator.template = resources.text.fromFile("foo.txt")
+                windowsStartScriptGenerator.template = resources.text.fromFile("foo.txt")
+            }
+        """
+        when:
+        file('foo.txt') << '42'
+        succeeds('foo')
+
+        then:
+        file('build/tmp/foo/foo').text=='42'
+        file('build/tmp/foo/foo.bat').text=='42'
+
+        when:
+        file('foo.txt').text = '43'
+        succeeds('foo')
+
+        then:
+        file('build/tmp/foo/foo').text=='43'
+        file('build/tmp/foo/foo.bat').text=='43'
+    }
+
+    @Issue("https://github.com/gradle/gradle/issues/34069")
+    def "Treat template as input for incremental build (Kotlin)"() {
         given:
         buildFile.delete()
         buildKotlinFile << """
-            tasks.register<CreateStartScripts>("foo") {
+            tasks.named<CreateStartScripts>("startScripts") {
+                // TODO - Can't find any possible way to set applicationName or outputDir...
+                //applicationName.set("foo")
                 applicationName = "foo"
-                outputDir = temporaryDir
+                //getApplicationName().set("foo")
+                //(applicationName as Property<String>).set("foo")
+                //outputDir = layout.buildDirectory.dir("tmp/foo").get().getAsFile()
+                //outputDir.set(layout.buildDirectory.dir("tmp/foo").get().getAsFile())
+                //(outputDir as DirectoryProperty).set(layout.buildDirectory.dir("tmp/foo"))
                 (unixStartScriptGenerator as TemplateBasedScriptGenerator).template = resources.text.fromFile("foo.txt")
                 (windowsStartScriptGenerator as TemplateBasedScriptGenerator).template = resources.text.fromFile("foo.txt")
             }
